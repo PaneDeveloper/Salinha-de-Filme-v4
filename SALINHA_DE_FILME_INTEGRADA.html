@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salinha de Filme Integrada v3.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- BroadcastChannel para sincronização local -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f1419;
+            color: #e5e7eb;
+            min-height: 100vh;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .player-container { 
+            position: relative; 
+            padding-top: 56.25%;
+            background: #000;
+            border-radius: 1rem;
+            overflow: hidden;
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+        
+        .player-container > * {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .chat-message {
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border-radius: 0.5rem;
+            background: rgba(255,255,255,0.05);
+            word-wrap: break-word;
+        }
+        
+        .chat-message.system { font-style: italic; color: #9ca3af; text-align: center; }
+        .chat-message.ai { background: rgba(102, 126, 234, 0.2); border-left: 3px solid #667eea; }
+        .chat-message.user { background: rgba(102, 126, 234, 0.1); }
+        
+        .dark-mode { background: #000; }
+        .dark-mode * { color: #e5e7eb; }
+        
+        @media (max-width: 768px) {
+            .flex-desktop { flex-direction: column; }
+        }
+        
+        .modal-bg {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-bg.active { display: flex; }
+        
+        .modal-content {
+            background: #1f2937;
+            border-radius: 1rem;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="dark-mode">
+    <!-- Tela de Login -->
+    <div id="loginScreen" class="flex items-center justify-center min-h-screen p-4">
+        <div class="glass-effect rounded-2xl p-8 max-w-md w-full">
+            <h1 class="text-4xl font-bold mb-2 text-center bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">Salinha de Filme</h1>
+            <p class="text-center text-gray-400 mb-8">Integrada v3.0 - Chat, Player & IA</p>
+            
+            <input id="nicknameInput" placeholder="Seu apelido" class="w-full p-3 rounded-lg bg-gray-700 text-white mb-4 focus:ring-2 focus:ring-purple-500 focus:outline-none" />
+            
+            <div class="flex gap-2 mb-4">
+                <input id="roomCodeInput" placeholder="CÓDIGO" maxlength="4" class="flex-1 p-3 rounded-lg bg-gray-700 text-white uppercase focus:ring-2 focus:ring-purple-500 focus:outline-none" />
+                <button id="btnJoinRoom" class="btn-primary">Entrar</button>
+            </div>
+            
+            <button id="btnCreateRoom" class="btn-primary w-full mb-4">Nova Sala</button>
+            <p id="statusText" class="text-center text-sm text-gray-400"></p>
+        </div>
+    </div>
+    
+    <!-- Tela Principal -->
+    <div id="mainScreen" class="hidden w-full">
+        <div class="h-screen flex flex-col md:flex-row gap-4 p-4">
+            <!-- Player (70% no desktop) -->
+            <div class="flex-1 flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-bold">Código: <span id="roomDisplay" class="text-purple-400"></span></h2>
+                    <button id="btnDarkMode" class="p-2 rounded-lg glass-effect hover:bg-opacity-20">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+                
+                <div class="player-container flex-1 mb-4">
+                    <video id="mainVideo" controls autoplay playsinline></video>
+                    <div id="videoPlaceholder" class="flex items-center justify-center bg-gradient-to-br from-purple-900 to-pink-900">
+                        <div class="text-center">
+                            <i class="fas fa-film text-4xl mb-4 opacity-50"></i>
+                            <p class="text-gray-300">Compartilhe uma mídia para começar...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-2 flex-wrap">
+                    <button id="btnSelectMedia" class="btn-primary"><i class="fas fa-folder-open"></i> Arquivo</button>
+                    <button id="btnInsertLink" class="btn-primary"><i class="fas fa-link"></i> Link</button>
+                    <button id="btnScreenShare" class="btn-primary" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);"><i class="fas fa-desktop"></i> Compartilhar Tela</button>
+                    <button id="btnShowPlaylist" class="btn-primary"><i class="fas fa-list"></i> Playlist</button>
+                    <button id="btnShowParticipants" class="btn-primary"><i class="fas fa-users"></i> Usuários</button>
+                </div>
+            </div>
+            
+            <!-- Chat (30% no desktop) -->
+            <div class="flex-1 md:w-1/3 flex flex-col">
+                <h3 class="text-xl font-bold mb-2">Chat</h3>
+                <div id="chatBox" class="flex-1 overflow-y-auto mb-4 p-3 glass-effect rounded-lg"></div>
+                
+                <div id="aiButtonsPanel" class="mb-4 p-3 glass-effect rounded-lg">
+                    <button id="btnAISuggest" class="btn-primary w-full mb-2"><i class="fas fa-sparkles"></i> Sugestão IA</button>
+                    <button id="btnAIAnalyze" class="btn-primary w-full mb-2"><i class="fas fa-brain"></i> Analisar Sentimento</button>
+                    <button id="btnSummarize" class="btn-primary w-full"><i class="fas fa-list-check"></i> Resumir Chat</button>
+                </div>
+                
+                <div class="flex gap-2">
+                    <input id="chatInput" placeholder="Digite sua mensagem..." class="flex-1 p-3 rounded-lg bg-gray-700 text-white focus:ring-2 focus:ring-purple-500 focus:outline-none" />
+                    <button id="btnSendChat" class="btn-primary"><i class="fas fa-paper-plane"></i></button>
+                </div>
+                
+                <div class="mt-2 text-xs text-gray-400">
+                    <p>💡 Dica: Mencione @Fox para ativar a IA!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal de Participantes -->
+    <div id="participantsModal" class="modal-bg">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Participantes</h3>
+                <button onclick="document.getElementById('participantsModal').classList.remove('active')" class="text-2xl">&times;</button>
+            </div>
+            <ul id="participantsList" class="space-y-2"></ul>
+        </div>
+    </div>
+    
+    <!-- Modal de Playlist -->
+    <div id="playlistModal" class="modal-bg">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Playlist</h3>
+                <button onclick="document.getElementById('playlistModal').classList.remove('active')" class="text-2xl">&times;</button>
+            </div>
+            <ul id="playlistList" class="space-y-2"></ul>
+        </div>
+    </div>
+
+    <script>
+        // ============ STATE & CONFIG ============
+        const channel = new BroadcastChannel('salinha-filme-integrada-sync');
+
+        // ============ VARIÁVEIS DE ESTADO ============
+        let roomId = null;
+        let username = null;
+        let isAdmin = false;
+        let playlist = [];
+        let participants = [];
+        let darkMode = localStorage.getItem('darkMode') === 'true';
+        let aiActive = false;
+        let screenShareStream = null;
+        let isScreenSharing = false;
+
+        // Gemini API Key
+        const GEMINI_KEY = "AIzaSyAOuzktFA0cXO6C5u4kug8TAOWd9h-wbUc";
+        const GEMINI_API = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+
+        // ============ ELEMENTOS DOM ============
+        const loginScreen = document.getElementById('loginScreen');
+        const mainScreen = document.getElementById('mainScreen');
+        const nicknameInput = document.getElementById('nicknameInput');
+        const roomCodeInput = document.getElementById('roomCodeInput');
+        const btnCreateRoom = document.getElementById('btnCreateRoom');
+        const btnJoinRoom = document.getElementById('btnJoinRoom');
+        const roomDisplay = document.getElementById('roomDisplay');
+        const chatBox = document.getElementById('chatBox');
+        const chatInput = document.getElementById('chatInput');
+        const btnSendChat = document.getElementById('btnSendChat');
+        const mainVideo = document.getElementById('mainVideo');
+        const videoPlaceholder = document.getElementById('videoPlaceholder');
+        const btnSelectMedia = document.getElementById('btnSelectMedia');
+        const btnInsertLink = document.getElementById('btnInsertLink');
+        const btnScreenShare = document.getElementById('btnScreenShare');
+        const btnShowPlaylist = document.getElementById('btnShowPlaylist');
+        const btnShowParticipants = document.getElementById('btnShowParticipants');
+        const participantsList = document.getElementById('participantsList');
+        const playlistList = document.getElementById('playlistList');
+        const btnDarkMode = document.getElementById('btnDarkMode');
+        const btnAISuggest = document.getElementById('btnAISuggest');
+        const btnAIAnalyze = document.getElementById('btnAIAnalyze');
+        const btnSummarize = document.getElementById('btnSummarize');
+        const statusText = document.getElementById('statusText');
+
+        // ============ FUNÇÕES AUXILIARES ============
+        function generateRoomCode() {
+            return Math.random().toString(36).substring(2, 6).toUpperCase();
+        }
+
+        function addChatMessage(sender, text, type = 'user') {
+            const msg = document.createElement('div');
+            msg.className = `chat-message ${type}`;
+            
+            if (type === 'system') {
+                msg.textContent = text;
+            } else if (type === 'ai') {
+                msg.innerHTML = `<strong style="color: #a78bfa;">🤖 Fox:</strong> ${text}`;
+            } else {
+                msg.innerHTML = `<strong style="color: #67e8f9;">${sender}:</strong> ${text}`;
+            }
+            
+            chatBox.appendChild(msg);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            // Salva localmente
+            saveMessageToLocalStorage(sender, text, type);
+            
+            // Sincroniza com outros abas
+            channel.postMessage({ type: 'chat', sender, text, version: Date.now() });
+        }
+        
+        function saveMessageToLocalStorage(sender, text, type) {
+            const messages = JSON.parse(localStorage.getItem(`room-${roomId}-messages`) || '[]');
+            messages.push({
+                sender: sender || 'Sistema',
+                text: text,
+                type: type,
+                timestamp: Date.now()
+            });
+            localStorage.setItem(`room-${roomId}-messages`, JSON.stringify(messages));
+        }
+
+        function updateParticipantsList() {
+            participantsList.innerHTML = '';
+            participants.forEach(p => {
+                const li = document.createElement('li');
+                li.className = 'p-2 rounded glass-effect';
+                li.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span>${p.name} ${p.isAdmin ? '👑' : ''} ${p.isMuted ? '🔇' : ''}</span>
+                        ${isAdmin && p.name !== username ? `
+                            <button onclick="kickUser('${p.name}')" class="text-red-400 hover:text-red-300 text-sm">Expulsar</button>
+                        ` : ''}
+                    </div>
+                `;
+                participantsList.appendChild(li);
+            });
+        }
+
+        function updatePlaylistUI() {
+            playlistList.innerHTML = '';
+            playlist.forEach((item, idx) => {
+                const li = document.createElement('li');
+                li.className = 'p-2 rounded glass-effect cursor-pointer hover:bg-opacity-50';
+                li.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span>${item.name}</span>
+                        ${isAdmin ? `<button onclick="removePlaylistItem(${idx})" class="text-red-400">Remover</button>` : ''}
+                    </div>
+                `;
+                li.onclick = () => playMedia(item.url, item.type);
+                playlistList.appendChild(li);
+            });
+        }
+
+        function playMedia(url, type) {
+            // Tenta criar iframe se disponível
+            const iframeHtml = createIframePlayer(url, type);
+            
+            if (iframeHtml) {
+                // Usa iframe
+                mainVideo.style.display = 'none';
+                videoPlaceholder.innerHTML = iframeHtml;
+                videoPlaceholder.style.display = 'flex';
+            } else if (type === 'cdn' || type === 'media-link') {
+                // Tenta reproduzir como src direto
+                mainVideo.src = url;
+                mainVideo.style.display = 'block';
+                videoPlaceholder.style.display = 'none';
+                mainVideo.play().catch(err => {
+                    // Se falhar, tenta como iframe genérico
+                    mainVideo.style.display = 'none';
+                    videoPlaceholder.innerHTML = `<iframe width="100%" height="100%" src="${url}" frameborder="0" allow="autoplay" allowfullscreen></iframe>`;
+                    videoPlaceholder.style.display = 'flex';
+                });
+            } else {
+                // Player de vídeo padrão
+                mainVideo.src = url;
+                mainVideo.style.display = 'block';
+                videoPlaceholder.style.display = 'none';
+                mainVideo.play().catch(err => console.log('Autoplay bloqueado'));
+            }
+            
+            // Sincroniza para todos localmente
+            localStorage.setItem(`room-${roomId}-media`, JSON.stringify({ url, type }));
+            channel.postMessage({ type: 'media', url, mediaType: type, version: Date.now() });
+        }
+
+        function kickUser(name) {
+            if (isAdmin) {
+                participants = participants.filter(p => p.name !== name);
+                updateParticipantsList();
+                addChatMessage('Admin', `${name} foi expulso da sala`, 'system');
+            }
+        }
+
+        function removePlaylistItem(idx) {
+            playlist.splice(idx, 1);
+            updatePlaylistUI();
+        }
+
+        // ============ SETUP ============
+        function setupApp() {
+            statusText.textContent = 'Pronto para entrar!';
+            statusText.className = 'text-green-400';
+        }
+
+        function createRoom() {
+            const nick = nicknameInput.value.trim();
+            if (!nick) {
+                statusText.textContent = 'Digite seu apelido!';
+                return;
+            }
+
+            roomId = generateRoomCode();
+            username = nick;
+            isAdmin = true;
+
+            participants = [{ name: username, isAdmin: true, isMuted: false }];
+            
+            // Salva no localStorage
+            localStorage.setItem(`room-${roomId}`, JSON.stringify({
+                createdBy: username,
+                participants: participants,
+                createdAt: Date.now()
+            }));
+            localStorage.setItem(`room-${roomId}-messages`, JSON.stringify([]));
+            
+            loginScreen.classList.add('hidden');
+            mainScreen.classList.remove('hidden');
+            roomDisplay.textContent = roomId;
+            addChatMessage('Sistema', `Sala criada! Código: ${roomId}`, 'system');
+            
+            // Notifica outras abas
+            channel.postMessage({ type: 'room-created', roomId, username, version: Date.now() });
+        }
+
+        function joinRoom() {
+            const nick = nicknameInput.value.trim();
+            const code = roomCodeInput.value.trim().toUpperCase();
+            
+            if (!nick || !code) {
+                statusText.textContent = 'Preencha todos os campos!';
+                return;
+            }
+
+            const roomData = localStorage.getItem(`room-${code}`);
+            if (!roomData) {
+                statusText.textContent = 'Sala não encontrada!';
+                return;
+            }
+
+            roomId = code;
+            username = nick;
+            isAdmin = false;
+            
+            const room = JSON.parse(roomData);
+            participants = room.participants || [];
+            participants.push({ name: nick, isAdmin: false, isMuted: false });
+            
+            // Atualiza no localStorage
+            localStorage.setItem(`room-${roomId}`, JSON.stringify({ ...room, participants }));
+
+            loginScreen.classList.add('hidden');
+            mainScreen.classList.remove('hidden');
+            roomDisplay.textContent = roomId;
+            updateParticipantsList();
+            addChatMessage('Sistema', `${nick} entrou na sala!`, 'system');
+            
+            // Notifica outras abas
+            channel.postMessage({ type: 'user-joined', roomId, username, version: Date.now() });
+        }
+
+        // ============ EVENTOS DE CHAT ============
+        btnSendChat.addEventListener('click', () => {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            if (text.toLowerCase().includes('@fox')) {
+                aiActive = true;
+                addChatMessage(username, text);
+                callGeminiAPI(text);
+            } else {
+                addChatMessage(username, text);
+            }
+
+            chatInput.value = '';
+        });
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') btnSendChat.click();
+        });
+
+        // ============ EVENTOS DE MÍDIA ============
+        btnSelectMedia.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'video/*,audio/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const url = URL.createObjectURL(file);
+                    playlist.push({ name: file.name, url: url, type: 'file' });
+                    updatePlaylistUI();
+                    playMedia(url, 'file');
+                }
+            };
+            input.click();
+        });
+
+        function detectMediaType(url) {
+            const lowerUrl = url.toLowerCase();
+            
+            // CDNs & Streaming Services
+            if (lowerUrl.includes('cdn.') || lowerUrl.includes('.cdn.') || lowerUrl.includes('cdnjs') || lowerUrl.includes('jsdelivr')) 
+                return 'cdn';
+            if (lowerUrl.includes('archive.org')) return 'archive';
+            if (lowerUrl.includes('dropbox.com')) return 'dropbox';
+            if (lowerUrl.includes('drive.google.com')) return 'gdrive';
+            if (lowerUrl.includes('onedrive')) return 'onedrive';
+            if (lowerUrl.includes('mega.nz')) return 'mega';
+            
+            // Video platforms
+            if (lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be') || lowerUrl.includes('youtube-nocookie')) 
+                return 'youtube';
+            if (lowerUrl.includes('vimeo.com')) return 'vimeo';
+            if (lowerUrl.includes('dailymotion.com') || lowerUrl.includes('dai.ly')) return 'dailymotion';
+            if (lowerUrl.includes('twitch.tv')) return 'twitch';
+            if (lowerUrl.includes('facebook.com') || lowerUrl.includes('fb.watch')) return 'facebook';
+            if (lowerUrl.includes('instagram.com')) return 'instagram';
+            if (lowerUrl.includes('tiktok.com') || lowerUrl.includes('vm.tiktok')) return 'tiktok';
+            if (lowerUrl.includes('streamable.com')) return 'streamable';
+            if (lowerUrl.includes('bilibili.com')) return 'bilibili';
+            if (lowerUrl.includes('nicovideo.jp')) return 'nicovideo';
+            if (lowerUrl.includes('rumble.com')) return 'rumble';
+            if (lowerUrl.includes('bitchute.com')) return 'bitchute';
+            if (lowerUrl.includes('odysee.com') || lowerUrl.includes('lbry')) return 'odysee';
+            if (lowerUrl.includes('peertube') || lowerUrl.includes('pornhub') || lowerUrl.includes('xvideos')) return 'external-video';
+            
+            // Audio platforms
+            if (lowerUrl.includes('spotify.com')) return 'spotify';
+            if (lowerUrl.includes('soundcloud.com') || lowerUrl.includes('snd.sc')) return 'soundcloud';
+            if (lowerUrl.includes('bandcamp.com')) return 'bandcamp';
+            if (lowerUrl.includes('mixcloud.com')) return 'mixcloud';
+            if (lowerUrl.includes('youtube-music') || lowerUrl.includes('music.youtube')) return 'youtube-music';
+            
+            // Live streams
+            if (lowerUrl.includes('twitch.tv')) return 'twitch-live';
+            if (lowerUrl.includes('youtube.com/live')) return 'youtube-live';
+            
+            // Direct media files
+            if (/\.(mp4|webm|mkv|avi|mov|flv|wmv|m3u8)$/i.test(url)) return 'video';
+            if (/\.(mp3|wav|m4a|flac|aac|ogg|wma|opus)$/i.test(url)) return 'audio';
+            if (/\.(m3u8|mpd)$/i.test(url)) return 'stream';
+            
+            // Playlists
+            if (lowerUrl.includes('youtube.com/playlist') || lowerUrl.includes('list=')) return 'youtube-playlist';
+            if (lowerUrl.includes('spotify.com/playlist')) return 'spotify-playlist';
+            
+            // Fallback - assume direct media link
+            return 'media-link';
+        }
+
+        function createIframePlayer(url, mediaType) {
+            let iframeHtml = '';
+            
+            switch(mediaType) {
+                case 'youtube':
+                    const youtubeId = url.includes('youtu.be/') ? url.split('youtu.be/')[1] : url.match(/(?:youtube\.com\/(?:.*v=|v\/|embed\/|watch\?v=))?([A-Za-z0-9_-]{11})/)?.[1];
+                    iframeHtml = `<iframe width="100%" height="100%" src="https://www.youtube.com/embed/${youtubeId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+                    break;
+                case 'vimeo':
+                    const vimeoId = url.match(/vimeo\.com\/(\d+)/)?.[1];
+                    iframeHtml = `<iframe width="100%" height="100%" src="https://player.vimeo.com/video/${vimeoId}" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+                    break;
+                case 'dailymotion':
+                    const dailyId = url.match(/dai\.ly\/([^\/]+)/)?.[1] || url.match(/dailymotion\.com\/video\/([^_]+)/)?.[1];
+                    iframeHtml = `<iframe width="100%" height="100%" src="https://www.dailymotion.com/embed/video/${dailyId}" frameborder="0" allow="autoplay" allowfullscreen></iframe>`;
+                    break;
+                case 'spotify':
+                    iframeHtml = `<iframe style="border-radius:12px" src="https://open.spotify.com/embed?uri=${url}" width="100%" height="100%" frameborder="0" allowfullscreen="" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>`;
+                    break;
+                case 'soundcloud':
+                    iframeHtml = `<iframe width="100%" height="100%" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff5500&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&show_teaser=true"></iframe>`;
+                    break;
+                case 'twitch':
+                    const channelName = url.match(/twitch\.tv\/([^\/\?]+)/)?.[1];
+                    iframeHtml = `<iframe src="https://player.twitch.tv/?channel=${channelName}&parent=${window.location.hostname}" height="100%" width="100%" allowfullscreen></iframe>`;
+                    break;
+                case 'bilibili':
+                    const bilibiliId = url.match(/bilibili\.com\/video\/(BV[A-Za-z0-9_-]+)/)?.[1];
+                    iframeHtml = `<iframe src="//player.bilibili.com/player.html?bvid=${bilibiliId}" width="100%" height="100%" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>`;
+                    break;
+                case 'gdrive':
+                    const driveId = url.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+                    iframeHtml = `<iframe src="https://drive.google.com/file/d/${driveId}/preview" width="100%" height="100%" allow="autoplay"></iframe>`;
+                    break;
+                case 'streamable':
+                    const streamId = url.match(/streamable\.com\/([a-z0-9]+)/)?.[1];
+                    iframeHtml = `<iframe src="https://streamable.com/e/${streamId}" width="100%" height="100%" frameborder="0" scrolling="no" allowfullscreen style="border-radius: 12px;"></iframe>`;
+                    break;
+                case 'cdn':
+                case 'media-link':
+                default:
+                    return null;
+            }
+            
+            return iframeHtml;
+        }
+
+        btnInsertLink.addEventListener('click', () => {
+            const url = prompt('Cole a URL de qualquer mídia:\n\n📺 YouTube, Vimeo, Twitch, TikTok, Instagram, Dailymotion...\n🎵 Spotify, SoundCloud, Bandcamp, YouTube Music...\n🎬 Rumble, Odysee, Streamable, Bilibili...\n📹 Link direto (MP4, WebM, HLS/M3U8...)\n📁 Google Drive, Dropbox, CDN...');
+            if (!url) return;
+
+            const mediaType = detectMediaType(url);
+            const displayName = url.includes('://') ? new URL(url).hostname.replace('www.', '') : url;
+
+            playlist.push({ name: displayName, url: url, type: mediaType });
+            updatePlaylistUI();
+            playMedia(url, mediaType);
+            addChatMessage('Sistema', `🎬 ${displayName} adicionado à playlist!`, 'system');
+        });
+
+        btnShowPlaylist.addEventListener('click', () => {
+            document.getElementById('playlistModal').classList.add('active');
+            updatePlaylistUI();
+        });
+
+        btnShowParticipants.addEventListener('click', () => {
+            document.getElementById('participantsModal').classList.add('active');
+            updateParticipantsList();
+        });
+
+        // ============ EVENTOS DE SCREEN SHARE ============
+        btnScreenShare.addEventListener('click', async () => {
+            if (isScreenSharing) {
+                // Para o compartilhamento
+                if (screenShareStream) {
+                    screenShareStream.getTracks().forEach(track => track.stop());
+                    screenShareStream = null;
+                }
+                isScreenSharing = false;
+                btnScreenShare.style.opacity = '1';
+                addChatMessage('Sistema', `🛑 ${username} parou o compartilhamento de tela!`, 'system');
+                
+                // Notifica outros
+                channel.postMessage({ 
+                    type: 'screen-share-stop', 
+                    username, 
+                    roomId,
+                    version: Date.now() 
+                });
+                return;
+            }
+
+            try {
+                // Solicita permissão de compartilhar tela
+                screenShareStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { 
+                        cursor: 'always',
+                        displaySurface: 'monitor'
+                    },
+                    audio: false
+                });
+
+                isScreenSharing = true;
+                btnScreenShare.style.opacity = '0.6';
+                btnScreenShare.innerHTML = '<i class="fas fa-stop"></i> Parar Compartilhamento';
+
+                // Cria canvas para capturar a tela
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const video = document.createElement('video');
+                video.srcObject = screenShareStream;
+                video.play();
+
+                // Função para desenhar e transmitir frames
+                function captureAndShare() {
+                    if (!isScreenSharing) return;
+
+                    try {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        ctx.drawImage(video, 0, 0);
+
+                        // Envia frame como data URL (comprimido)
+                        const frameData = canvas.toDataURL('image/jpeg', 0.7);
+                        
+                        // Notifica outros via BroadcastChannel
+                        channel.postMessage({
+                            type: 'screen-share-frame',
+                            frame: frameData,
+                            username,
+                            roomId,
+                            version: Date.now()
+                        });
+
+                        // Continua capturando
+                        requestAnimationFrame(captureAndShare);
+                    } catch (err) {
+                        console.error('Erro ao capturar frame:', err);
+                    }
+                }
+
+                // Inicia captura
+                video.onloadedmetadata = () => {
+                    // Primeiro frame
+                    playScreenShare(screenShareStream);
+                    addChatMessage('Sistema', `📺 ${username} começou a compartilhar a tela!`, 'system');
+                    
+                    // Notifica outros
+                    channel.postMessage({
+                        type: 'screen-share-start',
+                        username,
+                        roomId,
+                        version: Date.now()
+                    });
+
+                    // Inicia transmissão contínua
+                    captureAndShare();
+                };
+
+                // Monitora quando tela é desligada
+                screenShareStream.getTracks()[0].onended = () => {
+                    if (isScreenSharing) {
+                        isScreenSharing = false;
+                        btnScreenShare.style.opacity = '1';
+                        btnScreenShare.innerHTML = '<i class="fas fa-desktop"></i> Compartilhar Tela';
+                        addChatMessage('Sistema', `🛑 ${username} parou o compartilhamento de tela!`, 'system');
+                        
+                        channel.postMessage({
+                            type: 'screen-share-stop',
+                            username,
+                            roomId,
+                            version: Date.now()
+                        });
+                    }
+                };
+
+            } catch (err) {
+                if (err.name !== 'NotAllowedError') {
+                    addChatMessage('Sistema', `❌ Erro ao compartilhar tela: ${err.message}`, 'system');
+                }
+                isScreenSharing = false;
+                btnScreenShare.style.opacity = '1';
+            }
+        });
+
+        function playScreenShare(stream) {
+            mainVideo.srcObject = stream;
+            mainVideo.style.display = 'block';
+            videoPlaceholder.style.display = 'none';
+            mainVideo.play().catch(err => console.log('Erro ao reproduzir:', err));
+
+            // Salva no localStorage
+            localStorage.setItem(`room-${roomId}-media`, JSON.stringify({ 
+                type: 'screen-share',
+                username,
+                timestamp: Date.now()
+            }));
+
+            // Sincroniza
+            channel.postMessage({
+                type: 'media',
+                url: 'screen-share',
+                mediaType: 'screen-share',
+                username,
+                version: Date.now()
+            });
+        }
+
+        // ============ EVENTOS DE IA ============
+        btnAISuggest.addEventListener('click', async () => {
+            const prompt = "Sugira uma mídia interessante para assistir (filme, série, música, etc). Seja conciso e criativo!";
+            await callGeminiAPI(prompt);
+        });
+
+        btnAIAnalyze.addEventListener('click', async () => {
+            const messages = Array.from(chatBox.querySelectorAll('.chat-message')).map(m => m.textContent).join('\n');
+            const prompt = `Analise o sentimento geral deste chat:\n\n${messages}\n\nResuma em uma frase!`;
+            await callGeminiAPI(prompt);
+        });
+
+        btnSummarize.addEventListener('click', async () => {
+            const messages = Array.from(chatBox.querySelectorAll('.chat-message')).map(m => m.textContent).join('\n');
+            const prompt = `Resuma os pontos principais deste chat:\n\n${messages}`;
+            await callGeminiAPI(prompt);
+        });
+
+        async function callGeminiAPI(prompt) {
+            try {
+                const response = await fetch(GEMINI_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
+
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text || 'Erro na resposta';
+                addChatMessage('Fox', text, 'ai');
+            } catch (err) {
+                console.error('Erro Gemini:', err);
+                addChatMessage('Fox', 'Desculpe, estou com problemas agora! 😅', 'ai');
+            }
+        }
+
+        // ============ DARK MODE ============
+        btnDarkMode.addEventListener('click', () => {
+            darkMode = !darkMode;
+            localStorage.setItem('darkMode', darkMode);
+            document.body.classList.toggle('dark-mode', darkMode);
+        });
+
+        // ============ BROADCAST CHANNEL LISTENER ============
+        channel.onmessage = (e) => {
+            const data = e.data;
+            if (data.type === 'chat' && roomId) {
+                const msg = document.createElement('div');
+                msg.className = 'chat-message user';
+                msg.innerHTML = `<strong style="color: #67e8f9;">${data.sender}:</strong> ${data.text}`;
+                chatBox.appendChild(msg);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } else if (data.type === 'media' && roomId && data.mediaType !== 'screen-share') {
+                playMedia(data.url, data.mediaType);
+            } else if (data.type === 'screen-share-frame' && roomId && data.roomId === roomId) {
+                // Recebe frame de tela compartilhada
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = mainVideo;
+                    if (canvas.tagName === 'VIDEO') {
+                        // Substitui video por canvas se necessário
+                        mainVideo.style.display = 'none';
+                        videoPlaceholder.innerHTML = `<img src="${data.frame}" style="width: 100%; height: 100%; object-fit: contain;" />`;
+                        videoPlaceholder.style.display = 'flex';
+                    }
+                };
+                img.src = data.frame;
+            } else if (data.type === 'screen-share-start' && roomId && data.roomId === roomId) {
+                addChatMessage('Sistema', `📺 ${data.username} começou a compartilhar a tela!`, 'system');
+            } else if (data.type === 'screen-share-stop' && roomId && data.roomId === roomId) {
+                addChatMessage('Sistema', `🛑 ${data.username} parou o compartilhamento de tela!`, 'system');
+            }
+        };
+
+        // ============ EVENTO DE BOTÕES ============
+        btnCreateRoom.addEventListener('click', createRoom);
+        btnJoinRoom.addEventListener('click', joinRoom);
+
+        // ============ INICIALIZAÇÃO ============
+        setupApp();
+        if (darkMode) document.body.classList.add('dark-mode');
+    </script>
+</body>
+</html>
